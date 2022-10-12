@@ -5,7 +5,6 @@ import scipy.sparse
 from scipy.sparse.csgraph import shortest_path, dijkstra, floyd_warshall
 from tqdm import tqdm
 import time
-from sklearn.preprocessing import MinMaxScaler
 
 
 def build_adj(opt, num_node, verbose=True):
@@ -78,7 +77,6 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', default='tmall', help='diginetica/tmall/nowplaying/retailrocket')
     parser.add_argument('--filter', type=int, default=0,
                         help='Filter out unreliable edges below threshold.')
-    parser.add_argument('--k-hop', type=int, default=0)  # > 2 takes very long
     parser.add_argument('--spare', type=int, default=1, help='Create adj based on shortest paths.')
     parser.add_argument('--limit', type=float, default=200, help='Max. search depth in dijsktra.')
     parser.add_argument('--weight-undirected', type=float, default=0.0,
