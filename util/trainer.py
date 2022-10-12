@@ -108,9 +108,7 @@ class Trainer:
         self.patience = opt.patience
         self.Ks = Ks
         self.contrastive_base = opt.cl_base
-        self.contrastive_rl = opt.cl_rl
         self.beta = opt.beta
-        self.gamma = opt.gamma
         self.margin = opt.margin
 
         self.loss_function = nn.CrossEntropyLoss()
@@ -127,8 +125,8 @@ class Trainer:
         max_epochs = defaultdict(int)
         bad_counter = 0
         t = time.time()
-        con_loss, saved_rewards = torch.Tensor(0), torch.Tensor(0)
-        total_loss, total_con_loss, total_reward, mean_loss, mean_con_loss, mean_reward = 0, 0, 0, 0, 0, 0
+        con_loss = torch.Tensor(0)
+        total_loss, total_con_loss, mean_loss, mean_con_loss = 0, 0, 0, 0
         for epoch in range(epochs):
             self.model.train()
             for batch in self.train_loader:
@@ -147,50 +145,11 @@ class Trainer:
                     scores = scores[:batch_size]
 
                 loss = self.loss_function(scores, batch['targets'])
-
-                item_embeddings = item_embeddings.detach()
                 if self.contrastive_base and epoch >= 1:
                         con_loss = self.model.ssl_task(h_anchor, h_pos, h_neg)
 
                         combined_loss = loss + self.beta * con_loss
-                        combined_loss.backward()
-
-                elif self.contrastive_rl:
-                    neg_sessions, saved_log_probs, saved_rewards, h_neg, h_target = self.sampler.run_episode(batch,
-                                                                                                             self.model,
-                                                                                                             item_embeddings.detach(),
-                                                                                                             h_anchor)
-
-                    con_loss = nn.TripletMarginLoss(margin=1.0, p=2, reduction='none')(h_anchor, h_target,
-                                                                                       h_neg)  # TODO supervised triplet margin loss?
-                    # con_loss = self.model.ssl_task2(self.model.item_embedding, h_pos, h_neg, last_items)
-                    # con_loss = self.con_loss_function(h_pos_local, h_neg_global.detach(), d=1)
-                    # con_loss = self.model.ssl_task(h_pos, h_target, h_neg, labels=batch_dict['targets'])
-
-                    combined_loss = loss + self.beta * torch.mean(con_loss)
-                    combined_loss.backward()
-
-                    """train sampler"""
-                    self.sampler_optimizer.zero_grad()
-
-                    # subtract average reward from the policy gradient to reduce the variance (see KGpolicy paper)
-                    # REINFORCE with baseline (mean)
-                    reward_batch = saved_rewards - saved_rewards.mean()
-                    # eps = np.finfo(np.float32).eps.item()
-                    # reward_batch = (saved_rewards - saved_rewards.mean()) / (saved_rewards.std() + eps)
-
-                    batch_size = reward_batch.size(1)
-                    n = reward_batch.size(0) - 1
-                    R = torch.zeros(batch_size, device=reward_batch.device)
-                    returns = torch.zeros(reward_batch.size(), device=reward_batch.device)
-
-                    for i, r in enumerate(reward_batch.flip(0)):
-                        R = r + self.gamma * R
-                        returns[n - i] = R
-
-                    reinforce_loss = -1 * torch.sum(returns * saved_log_probs)
-                    reinforce_loss.backward()
-                    self.sampler_optimizer.step()
+                        combined_loss.backward()           
                 else:
                     loss.backward()
 
@@ -199,18 +158,16 @@ class Trainer:
                 if log_interval:
                     mean_loss += loss.item() / log_interval
                     mean_con_loss += torch.mean(con_loss).item() / log_interval
-                    mean_reward += saved_rewards.mean() / log_interval
 
                 total_loss += loss.item()
                 total_con_loss += torch.mean(con_loss).item()
-                total_reward += saved_rewards.mean()
 
                 if log_interval and self.batch > 0 and self.batch % log_interval == 0:
                     print(
-                        f'Batch {self.batch}: Loss = {mean_loss:.4f}, Con-Loss = {mean_con_loss:.4f}, Reward = {mean_reward:.2f}, Time Elapsed = {time.time() - t:.2f}s'
+                        f'Batch {self.batch}: Loss = {mean_loss:.4f}, Con-Loss = {mean_con_loss:.4f}, Time Elapsed = {time.time() - t:.2f}s'
                     )
                     t = time.time()
-                    mean_loss, mean_con_loss, mean_reward = 0, 0, 0
+                    mean_loss, mean_con_loss = 0, 0
                 self.batch += 1
 
             curr_results = evaluate(
@@ -224,7 +181,6 @@ class Trainer:
                 print(f'\nEpoch {self.epoch}:')
                 print('Loss:\t%.3f' % total_loss)
                 print('Con-Loss:\t%.3f' % total_con_loss)
-                print('Total-Reward:\t%.3f' % total_reward)
                 print_results(curr_results)
 
             any_better_result = False
@@ -245,7 +201,6 @@ class Trainer:
             self.epoch += 1
             total_loss = 0.0
             total_con_loss = 0.0
-            total_reward = 0.0
 
         print('\nBest results')
         print_results(max_results, max_epochs)
