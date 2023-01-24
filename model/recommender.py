@@ -10,13 +10,6 @@ from model.layers import *
 from model.losses import *
 
 
-def chebyshev_distance(x1, x2):
-    return torch.max(torch.abs(x1 - x2), dim=1).values
-
-def cosine_distance(x1, x2):
-    return 1.0 - F.cosine_similarity(x1, x2)
-
-
 class GraphRecommender(nn.Module):
     def __init__(self, opt, num_node, adj, len_session, n_train_sessions):
         super(GraphRecommender, self).__init__()
@@ -32,12 +25,9 @@ class GraphRecommender(nn.Module):
                                            padding_idx=0)
         self.pos_embedding = nn.Embedding(self.len_session, self.dim)
 
-        #self.ssl_task = nn.TripletMarginWithDistanceLoss(margin=opt.margin, distance_function=nn.PairwiseDistance(p = 1)) # manhattan
-        self.ssl_task = nn.TripletMarginWithDistanceLoss(margin=opt.margin, distance_function=nn.PairwiseDistance(p = 2)) # euclidian
-        #self.ssl_task = nn.TripletMarginWithDistanceLoss(margin=opt.margin, distance_function=chebyshev_distance)
-        #self.ssl_task = nn.TripletMarginWithDistanceLoss(margin=opt.margin, distance_function=cosine_distance)
+        self.ssl_task = SSLTask(opt)
 
-        self.item_conv = GlobalItemConv(spare=opt.spare, layers=opt.layers)
+        self.item_conv = GlobalItemConv(layers=opt.layers)
         self.w_k = opt.w_k
         self.adj = adj
         self.dropout = opt.dropout
@@ -58,7 +48,7 @@ class GraphRecommender(nn.Module):
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
 
-    def compute_scores(self, item_seq, hidden, graph_item_embeddings, rev_pos=True, attn=True):
+    def compute_sess_emb(self, item_seq, hidden, rev_pos=True, attn=True):
         batch_size = hidden.shape[0]
         len = hidden.shape[1]
         mask = torch.unsqueeze((item_seq != 0), -1)
@@ -79,22 +69,33 @@ class GraphRecommender(nn.Module):
         if attn:
             beta = torch.matmul(nh, self.w_2)
             beta = beta * mask
-            select = torch.sum(beta * hidden, 1)
+            sess_emb = torch.sum(beta * hidden, 1)
         else:
-            select = torch.sum(nh * hidden, 1)
+            sess_emb = torch.sum(nh * hidden, 1)
 
-        b = graph_item_embeddings
+        return sess_emb
 
-        # weighted L2 normalization: NISER, DSAN, STAN
-        select = self.w_k * F.normalize(select, dim=-1, p=2)
-        b = F.normalize(b, dim=-1, p=2)
+    def compute_con_loss(self, batch, sess_emb, item_embs):
+        mask = torch.unsqueeze((batch['inputs'] != 0), -1)
+        last_item_pos = torch.sum(mask, dim=1) - 1
+        last_items = torch.gather(batch['inputs'], dim=1, index=last_item_pos).squeeze()
+        last_items_emb = item_embs[last_items]
 
-        scores = torch.matmul(select, b.transpose(1, 0))
-        return select, scores
+        pos_last_items_emb = item_embs[batch['pos_last_items']]
+        neg_last_items_emb = item_embs[batch['neg_last_items']]
 
-    def forward(self, items, inputs, alias_inputs, graph_item_embs=None):
-        if graph_item_embs == None:
-            graph_item_embs = self.item_conv(self.item_embedding.weight, self.adj)
+        pos_target_item_emb = item_embs[batch['targets']]
+        neg_targets_item_emb = item_embs[batch['neg_targets']]
+
+        con_loss = self.ssl_task(sess_emb, last_items_emb, pos_last_items_emb, neg_last_items_emb,
+                                       pos_target_item_emb, neg_targets_item_emb)
+
+        return con_loss
+
+
+    def forward(self, batch, cl=False):
+        items, inputs, alias_inputs = batch['items'], batch['inputs'], batch['alias_inputs']
+        graph_item_embs = self.item_conv(self.item_embedding.weight, self.adj)
         hidden = graph_item_embs[items]
 
         # dropout
@@ -104,6 +105,16 @@ class GraphRecommender(nn.Module):
         seq_hidden = torch.gather(hidden, dim=1, index=alias_inputs)
 
         # reverse position attention
-        select, scores = self.compute_scores(inputs, seq_hidden, graph_item_embs, rev_pos=True, attn=True)
+        sess_emb = self.compute_sess_emb(inputs, seq_hidden, rev_pos=True, attn=True)
 
-        return select, scores, graph_item_embs
+        # weighted L2 normalization: NISER, DSAN, STAN, COTREC
+        select = self.w_k * F.normalize(sess_emb, dim=-1, p=2)
+        graph_item_embs_norm = F.normalize(graph_item_embs, dim=-1, p=2)
+
+        scores = torch.matmul(select, graph_item_embs_norm.transpose(1, 0))
+
+        con_loss = torch.Tensor(0)
+        if cl:
+            con_loss = self.compute_con_loss(batch, select, graph_item_embs_norm)
+
+        return scores, con_loss

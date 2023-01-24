@@ -11,6 +11,7 @@ torch = "*"
 matplotlib = "*"
 nltk = "*"
 scipy = "*"
+cython = "*"
 
 [dev-packages]
 
