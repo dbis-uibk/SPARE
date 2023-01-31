@@ -10,7 +10,7 @@ Preprocessed datasets already in `datasets` folder.
 Tmall dataset as example:
 - Construct global item graph, run:
     ```
-    python build_global_graph.py --dataset tmall
+    python build_graph.py --dataset tmall
     ```
 
 - Train GNN, run:
