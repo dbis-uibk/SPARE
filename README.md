@@ -13,11 +13,6 @@ Tmall dataset as example:
     python build_global_graph.py --dataset tmall
     ```
 
-- Sample positive and negative sessions, run:
-     ```
-    python pos_neg_sessions.py --dataset tmall
-    ```
-
 - Train GNN, run:
      ```
     python main.py --dataset tmall
