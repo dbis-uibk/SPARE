@@ -68,6 +68,7 @@ def main():
         opt.beta = 0.05
         opt.k = 4
         opt.temp = 0.7
+        opt.layers = 2
 
     print(opt)
     print('reading dataset')
