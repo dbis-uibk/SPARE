@@ -19,7 +19,11 @@ Tmall dataset as example:
     ```
 
 ## Requirements
-See `Pipfile`.
+- Python 3
+- PyTorch
+- nltk
+- scipy
+- tqdm
 
 ## Citation
 TBA
