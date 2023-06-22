@@ -1,7 +1,6 @@
 import time
 from collections import defaultdict
 from tqdm import tqdm
-import nni
 
 import torch
 from torch import nn, optim
@@ -153,9 +152,6 @@ class Trainer:
             curr_results = evaluate(
                 self.model, self.test_loader, Ks=self.Ks
             )
-
-            '''# hpt
-            nni.report_intermediate_result(round(curr_results['MRR@20'] * 100, 2))'''
 
             if log_interval:
                 print(f'\nEpoch {self.epoch}:')
